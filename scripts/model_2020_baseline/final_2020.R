@@ -116,6 +116,10 @@ df <- df %>%
          p_trump = trump/two_party_sum)
 first_day <- min(df$start.date)
 
+# save
+write.csv(df, "2020_all_polls_wrangled.csv")
+
+
 # prepare stan data -----------------------------------------------------------
 
 ## --- create correlation matrix
