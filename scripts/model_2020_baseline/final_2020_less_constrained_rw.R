@@ -230,8 +230,13 @@ diag(state_correlation_mu_b_T) <- ifelse(new_diag > diag(state_correlation_mu_b_
     # change from 0.01 to 0.6 in the parentheses
     # essentially assumes that public opinion can strongly 'jump' from day to day
     # 2)
-    # change from 0.01 to 0.2 in the parentheses (day to day change of 4%)
-state_correlation_mu_b_walk <- cov_matrix(51, (0.1)^2, 0.9) 
+    # change from 0.01 to 0.1 in the parentheses (day to day change of 10 percentage points)
+    # 3) 
+    # change from 0.01 to 0.05 in the parentheses (day to day change of 5 percentage points)
+    # 4) 
+    # change from 0.01 to 0.02
+
+state_correlation_mu_b_walk <- cov_matrix(51, (0.02)^2, 0.9) 
 state_correlation_mu_b_walk <- state_correlation_mu_b_walk * state_correlation
 
 ## --- numerical indices
@@ -378,8 +383,8 @@ unadjusted_state <- df %>% mutate(unadjusted = ifelse(!(pollster %in% adjusters)
                                    
 # priors ---
 prior_sigma_measure_noise <- 0.01 ### 0.1 / 2
-prior_sigma_a <- 0.25 ### 0.05 / 2
-prior_sigma_b <- 0.25 ### 0.05 / 2
+prior_sigma_a <- 0.03 ### 0.05 / 2
+prior_sigma_b <- 0.02 ### 0.05 / 2
 mu_b_prior <- mu_b_prior
 prior_sigma_c <- 0.02 ### 0.1 / 2
 prior_sigma_m <- 0.02 ### 0.1 / 2
@@ -762,12 +767,12 @@ state_polls.gg <- p_biden %>%
   scale_x_date(limits=c(ymd('20120-02-01','2020-11-03')),date_breaks='1 month',date_labels='%b') +
   labs(subtitle='p_biden state')
 
-grid.arrange(natl_polls.gg, natl_evs.gg, state_polls.gg, 
+plt.joint <- grid.arrange(natl_polls.gg, natl_evs.gg, state_polls.gg, 
              layout_matrix = rbind(c(1,1,3,3,3),
                                    c(2,2,3,3,3)),
              top = identifier
 )
-
+ggsave("joint_5p.png", plt.joint)
 
 # what's the tipping point state?
 tipping_point <- draws %>%
@@ -855,6 +860,7 @@ ev.gg <- ggplot(final_evs,aes(x=dem_ev,
   scale_fill_manual(name='Electoral College winner',values=c('Democratic'='#3A4EB1','Republican'='#E40A04')) +
   labs(x='Democratic electoral college votes',
        subtitle=sprintf("p(dem win) = %s",round(mean(final_evs$dem_ev>=270),2)) )
+ggsave("ev_5p.png", ev.gg)
 
 
 print(ev.gg)

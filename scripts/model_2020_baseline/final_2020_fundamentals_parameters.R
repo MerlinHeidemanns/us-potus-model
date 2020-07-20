@@ -51,16 +51,6 @@ mean_low_high <- function(draws, states, id){
   return(draws_df) 
 }
 
-
-df <- read.csv("2020_all_polls_wrangled.csv")
-
-today <- ymd("2020-07-19")
-today_m14 <- ymd("2020-07-05")
-election_day <- ymd("2020-11-03")
-
-df_p14 <- df %>%
-  filter(t >= start_date & !is.na(t))
-
 ## Master variables
 RUN_DATE <- ymd("2020-07-19")
 
@@ -68,6 +58,51 @@ election_day <- ymd("2020-11-03")
 start_date <- as.Date("2020-02-01") # Keeping all polls after March 1, 2020
 
 
+# wrangle polls -----------------------------------------------------------
+all_polls <- read.csv("data/2020 US presidential election polls.csv", stringsAsFactors = FALSE, header = TRUE)
+all_polls <- all_polls %>% filter(!is.na(biden),!is.na(trump))#, include == "TRUE")
+
+
+
+
+
+# basic mutations
+df <- all_polls %>% 
+  tbl_df %>%
+  dplyr::select(state, pollster, number.of.observations, population, mode, 
+                start.date, end.date,
+                biden, trump, undecided, other) %>%
+  #filter(mdy(end.date) <= RUN_DATE) %>%
+  mutate(start.date = as.character(mdy(start.date)),
+         end.date = as.character(mdy(end.date))) %>%
+  mutate(population = case_when(population == 'lv' ~ 'Likely Voters',
+                                population == 'rv' ~ 'Registered Voters',
+                                population == 'a' ~ 'Adults')) %>%
+  rename(n = number.of.observations) %>%
+  mutate(begin = ymd(start.date),
+         end   = ymd(end.date),
+         t = end - (1 + as.numeric(end-begin)) %/% 2) %>%
+  filter(t >= start_date & !is.na(t)
+         & (population == "Likely Voters" | 
+              population == "Registered Voters" | 
+              population == "Adults") # get rid of disaggregated polls
+         & n > 1) 
+
+# pollster mutations
+df <- df %>%
+  mutate(pollster = str_extract(pollster, pattern = "[A-z0-9 ]+") %>% sub("\\s+$", "", .),
+         pollster = replace(pollster, pollster == "Fox News", "FOX"), # Fixing inconsistencies in pollster names
+         pollster = replace(pollster, pollster == "WashPost", "Washington Post"),
+         pollster = replace(pollster, pollster == "ABC News", "ABC"),
+         pollster = replace(pollster, pollster == "DHM Research", "DHM"),
+         pollster = replace(pollster, pollster == "Public Opinion Strategies", "POS"),
+         undecided = ifelse(is.na(undecided), 0, undecided))
+
+# mode mutations
+df <- df %>% 
+  mutate(mode = case_when(mode == 'Internet' ~ 'Online poll',
+                          grepl("live phone",tolower(mode)) ~ 'Live phone component',
+                          TRUE ~ 'Other'))
 
 # vote shares etc
 df <- df %>%
@@ -80,6 +115,7 @@ df <- df %>%
          n_trump = round(n * trump/100),
          p_trump = trump/two_party_sum)
 first_day <- min(df$start.date)
+
 
 # prepare stan data -----------------------------------------------------------
 
@@ -251,31 +287,41 @@ names(ev_state) <- state_abb
 # read in abramowitz data
 abramowitz <- read.csv('data/abramowitz_data.csv') %>% 
   filter(year < 2020)
-prior_model <- lm(
+prior_model <- rstanarm::stan_lm(
   incvote ~  juneapp + q2gdp, 
-  data = abramowitz
+  data = abramowitz, prior = R2(0.7, what = "mean"), 
 )
 
 # make predictions
-national_mu_prior <- predict(prior_model,newdata = tibble(q2gdp = -5,
-                                                          juneapp = -10))
+
+national_mu_prior_df <- setNames(
+  data.frame("mu" = posterior_predict(prior_model,
+                                      newdata = tibble(q2gdp = -5,
+                                                       juneapp = -10))), 
+  "mu")
+ggplot(data = national_mu_prior_df) + 
+  geom_histogram(mapping = aes(x = mu), bins = 100, alpha = 0.5) + 
+  geom_vline(mapping = aes(xintercept = mean(mu))) +
+  theme_classic()
+
+mu_prior_quantiles <- quantile(national_mu_prior_df$mu, probs = c(0.125, 0.25))
 
 # on correct scale
-national_mu_prior <- national_mu_prior / 100
+national_mu_prior <- mu_prior_quantiles[2] / 100
+national_mu_prior <- mean(national_mu_prior_df$mu)/100
 # Mean of the mu_b_prior
 mu_b_prior <- logit(national_mu_prior + prior_diff_score)
 # or read in priors if generated already
-prior_in <- read_csv("data/state_priors_08_12_16.csv") %>%
-  filter(date <= RUN_DATE) %>%
-  group_by(state) %>%
-  arrange(date) %>%
-  filter(date == max(date)) %>%
-  select(state,pred) %>%
-  ungroup() %>%
-  arrange(state)
-
-mu_b_prior <- logit(prior_in$pred )
-names(mu_b_prior) <- prior_in$state
+#prior_in <- read_csv("data/state_priors_08_12_16.csv") %>%
+#  filter(date <= RUN_DATE) %>%
+#  group_by(state) %>%
+#  arrange(date) %>%
+#  filter(date == max(date)) %>%
+#  select(state,pred) %>%
+#  ungroup() %>%
+#  arrange(state)
+#mu_b_prior <- logit(prior_in$pred )
+#names(mu_b_prior) <- prior_in$state
 names(mu_b_prior) == names(prior_diff_score) # correct order?
 national_mu_prior <- weighted.mean(inv.logit(mu_b_prior), state_weights)
 cat(sprintf('Prior Biden two-party vote is %s\nWith a standard error of %s',
